@@ -1,20 +1,54 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import RosterPage from './pages/RosterPage';
 import ChatPage from './pages/ChatPage';
+import SettingsPage from './pages/SettingsPage';
 import { useXMPPStore } from './contexts/XMPPContext';
+import { loadStoredCredentials } from './contexts/XMPPContext';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const status = useXMPPStore((s) => s.status);
+
+  if (status === 'connecting' || status === 'reconnecting') {
+    return (
+      <div className="min-h-dvh flex items-center justify-center bg-[var(--color-surface-0)]">
+        <div className="flex flex-col items-center gap-3 text-[var(--color-text-muted)]">
+          <svg className="animate-spin w-6 h-6" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" strokeDasharray="60" strokeLinecap="round" />
+          </svg>
+          <span className="text-sm">Reconnecting…</span>
+        </div>
+      </div>
+    );
+  }
+
   if (status !== 'connected' && status !== 'authenticated') {
     return <Navigate to="/login" replace />;
   }
+
   return <>{children}</>;
+}
+
+function AutoConnect() {
+  const status = useXMPPStore((s) => s.status);
+  const connect = useXMPPStore((s) => s.connect);
+
+  useEffect(() => {
+    if (status !== 'disconnected') return;
+    const creds = loadStoredCredentials();
+    if (creds) {
+      connect(creds.jid, '', creds.websocketUrl);
+    }
+  }, []);  // only on mount
+
+  return null;
 }
 
 export default function App() {
   return (
     <BrowserRouter>
+      <AutoConnect />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
@@ -30,6 +64,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ChatPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <RequireAuth>
+              <SettingsPage />
             </RequireAuth>
           }
         />

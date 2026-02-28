@@ -71,9 +71,38 @@ export interface XMPPState {
 	_addMessage: (jid: string, message: Message) => void;
 	_updateContactPresence: (jid: string, presence: Contact['presence']) => void;
 	_updateContactLastMessage: (jid: string, body: string, time: string) => void;
+	_setRooms: (rooms: Room[]) => void;
+	_updateRoomLastMessage: (jid: string, body: string, time: string) => void;
 }
 
-// Cached reference to the converse api, set during plugin init
+// ─── Credentials persistence ─────────────────────────────────────
+
+const CREDS_KEY = 'vox-credentials';
+
+export interface StoredCredentials {
+	jid: string;
+	websocketUrl: string;
+}
+
+export function loadStoredCredentials(): StoredCredentials | null {
+	try {
+		const raw = localStorage.getItem(CREDS_KEY);
+		return raw ? JSON.parse(raw) : null;
+	} catch {
+		return null;
+	}
+}
+
+function saveCredentials(creds: StoredCredentials) {
+	localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
+}
+
+function clearCredentials() {
+	localStorage.removeItem(CREDS_KEY);
+}
+
+// ─── Converse API cache ──────────────────────────────────────────
+
 let converseApi: any = null;
 
 // ─── Store ───────────────────────────────────────────────────────
@@ -104,6 +133,9 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 					api.listen.on('connected', () => {
 						const myJid = api.connection.get()?.jid || jid;
 						set({ status: 'connected', myJid });
+						saveCredentials({ jid, websocketUrl });
+						// Sync joined rooms after connection
+						setTimeout(() => syncRooms(api), 1000);
 					});
 
 					api.listen.on('reconnected', () => set({ status: 'connected' }));
@@ -123,19 +155,18 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 						handleIncomingMessage(data, get().myJid);
 					});
 
-					api.listen.on('sendMessage', (data: any) => {
-						handleOutgoingMessage(data, get().myJid);
-					});
+					// Outgoing messages are added optimistically in sendMessage()
 				},
 			}); } catch (_) { /* already registered after HMR */ }
 
+			const hasPassword = !!password;
 			await converse.initialize({
 				jid,
-				password,
+				...(hasPassword ? { password } : {}),
 				websocket_url: websocketUrl,
 
 				view_mode: 'embedded',
-				auto_login: true,
+				auto_login: hasPassword,
 				keepalive: true,
 
 				message_carbons: true,
@@ -148,21 +179,50 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 				// OMEMO
 				omemo_default: true,
 
-				whitelisted_plugins: ['vox-bridge'],
+				whitelisted_plugins: ['vox-bridge', 'converse-profile'],
 			});
+
+			// If restoring session (no password), give it time then check
+			if (!hasPassword) {
+				setTimeout(() => {
+					if (get().status !== 'connected') {
+						clearCredentials();
+						set({ status: 'disconnected' });
+					}
+				}, 5000);
+			}
 		} catch (err: any) {
+			if (!hasPassword) {
+				clearCredentials();
+			}
 			set({ status: 'error', error: err.message || 'Connection failed' });
 		}
 	},
 
 	disconnect: () => {
-		// converse.api.user.logout();
-		set({ status: 'disconnected', myJid: null, contacts: [], messages: {} });
+		clearCredentials();
+		converseApi = null;
+		set({ status: 'disconnected', myJid: null, contacts: [], messages: {}, rooms: [] });
 	},
 
 	sendMessage: async (to, body) => {
 		try {
 			if (!converseApi) throw new Error('Not connected');
+
+			// Add to store immediately so UI updates instantly
+			const myJid = get().myJid;
+			const msg: Message = {
+				id: crypto.randomUUID(),
+				from: myJid || '',
+				to,
+				body,
+				time: new Date().toISOString(),
+				isMe: true,
+				isEncrypted: false,
+				status: 'sending',
+			};
+			get()._addMessage(to, msg);
+
 			const chat = await converseApi.chats.get(to, {}, true);
 			if (chat) {
 				chat.sendMessage({ body });
@@ -185,12 +245,12 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			const myJid = get().myJid;
 			const models = chat.messages?.models ?? [];
 			const msgs: Message[] = models
-				.filter((m: any) => m.get('body'))
+				.filter((m: any) => m.get('body') || m.get('plaintext'))
 				.map((m: any) => ({
 					id: m.get('origin_id') || m.get('msgid') || m.id || crypto.randomUUID(),
 					from: m.get('from')?.split('/')[0] || '',
 					to: m.get('to')?.split('/')[0] || '',
-					body: m.get('body'),
+					body: m.get('plaintext') || m.get('body'),
 					time: m.get('time') || new Date().toISOString(),
 					isMe: m.get('sender') === 'me' || m.get('from')?.split('/')[0] === myJid?.split('/')[0],
 					isEncrypted: m.get('is_encrypted') || false,
@@ -216,7 +276,7 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 		set((state) => ({
 			contacts: state.contacts.map((c) =>
 				c.jid === jid ? { ...c, unreadCount: 0 } : c
-										),
+			),
 		}));
 	},
 
@@ -237,22 +297,21 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 		set((state) => ({
 			contacts: state.contacts.map((c) =>
 				c.jid === jid ? { ...c, presence } : c
-										),
+			),
 		})),
 
 	_updateContactLastMessage: (jid, body, time) =>
 		set((state) => ({
 			contacts: state.contacts.map((c) =>
 				c.jid === jid
-				? {
-					...c,
-					lastMessage: body,
-					lastMessageTime: time,
-					unreadCount:
-					state.activeChatJid === jid ? 0 : c.unreadCount + 1,
-				}
-				: c
-										),
+					? {
+						...c,
+						lastMessage: body,
+						lastMessageTime: time,
+						unreadCount: state.activeChatJid === jid ? 0 : c.unreadCount + 1,
+					}
+					: c
+			),
 		})),
 }));
 
@@ -296,30 +355,6 @@ function handleIncomingMessage(data: any, myJid: string | null) {
 	const store = useXMPPStore.getState();
 	store._addMessage(from, message);
 	store._updateContactLastMessage(from, body, message.time);
-}
-
-function handleOutgoingMessage(data: any, myJid: string | null) {
-	const model = data?.message;
-	const chatbox = data?.chatbox;
-	if (!model) return;
-
-	// The bare JID comes from the chatbox id, which is the reliable source
-	const to = chatbox?.get?.('jid') || chatbox?.id || model.get?.('to')?.split('/')[0];
-	const body = model.get?.('body') || model.get?.('message');
-	if (!to || !body) return;
-
-	const message: Message = {
-		id: model.get?.('origin_id') || model.get?.('msgid') || model.id || crypto.randomUUID(),
-		from: myJid || '',
-		to,
-		body,
-		time: model.get?.('time') || new Date().toISOString(),
-		isMe: true,
-		isEncrypted: model.get?.('is_encrypted') || false,
-		status: 'sent',
-	};
-
-	useXMPPStore.getState()._addMessage(to, message);
 }
 
 function mapPresence(show: string | undefined): Contact['presence'] {

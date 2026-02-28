@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRoster, useActiveChat, useXMPP } from '@/hooks/useXMPP';
 import ContactItem from '@/components/ContactItem';
@@ -8,6 +9,8 @@ export default function RosterPage() {
   const contacts = useRoster();
   const { activeChatJid, setActiveChat, markRead } = useActiveChat();
   const { myJid, status } = useXMPP();
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [newChatJid, setNewChatJid] = useState('');
 
   const handleTapContact = (jid: string) => {
     setActiveChat(jid);
@@ -40,6 +43,7 @@ export default function RosterPage() {
             <button
               className="w-10 h-10 flex items-center justify-center rounded-full text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
               aria-label="New chat"
+              onClick={() => setShowNewChat(true)}
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
@@ -84,6 +88,56 @@ export default function RosterPage() {
           ))
         )}
       </div>
+      {/* New Chat Modal */}
+      {showNewChat && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowNewChat(false)}
+        >
+          <div
+            className="bg-[var(--color-surface-1)] rounded-2xl p-6 w-[90%] max-w-sm shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
+              New Chat
+            </h2>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const jid = newChatJid.trim();
+                if (!jid) return;
+                setShowNewChat(false);
+                setNewChatJid('');
+                navigate(`/chat/${encodeURIComponent(jid)}`);
+              }}
+            >
+              <input
+                autoFocus
+                type="text"
+                placeholder="user@example.com"
+                value={newChatJid}
+                onChange={(e) => setNewChatJid(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-[var(--color-surface-2)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:ring-2 focus:ring-[var(--color-amber-400)] mb-4"
+              />
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowNewChat(false)}
+                  className="px-4 py-2 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl text-sm font-medium bg-[var(--color-amber-500)] text-black hover:bg-[var(--color-amber-400)] transition-colors"
+                >
+                  Start Chat
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
