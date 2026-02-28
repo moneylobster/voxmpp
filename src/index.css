@@ -1,0 +1,69 @@
+:root {
+  /* Surfaces — dark theme */
+  --color-surface-0: #0f0f0f;
+  --color-surface-1: #1a1a1a;
+  --color-surface-2: #252525;
+  --color-surface-3: #303030;
+
+  /* Text */
+  --color-text-primary: #f0f0f0;
+  --color-text-secondary: #b0b0b0;
+  --color-text-muted: #606060;
+
+  /* Amber accent */
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+
+  /* Presence colours */
+  --color-online:  #22c55e;
+  --color-away:    #eab308;
+  --color-dnd:     #ef4444;
+  --color-offline: #4b5563;
+
+  /* Fonts */
+  --font-display: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  background-color: var(--color-surface-0);
+  color: var(--color-text-primary);
+  font-family: system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Chat bubble shapes */
+.bubble-sent {
+  background: var(--color-amber-600);
+  border-radius: 18px 18px 4px 18px;
+  color: var(--color-text-primary);
+}
+
+.bubble-received {
+  background: var(--color-surface-2);
+  border-radius: 18px 18px 18px 4px;
+  color: var(--color-text-primary);
+}
+
+/* Message enter animation */
+@keyframes msg-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.msg-enter {
+  animation: msg-enter 0.18s ease-out;
+}
+
+/* Smooth scroll for chat */
+.chat-scroll {
+  scroll-behavior: smooth;
+}
