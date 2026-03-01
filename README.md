@@ -1,7 +1,6 @@
-# Vox — Modern XMPP Client with WebSocket Support
+# Vox — XMPP chat client
 
-A mobile-first XMPP chat client built on `@converse/headless`, designed for
-servers behind Cloudflare Tunnels (WebSocket-only connectivity).
+An XMPP chat client built on `@converse/headless`. Caveat Emptor: entirely vibecoded, treat with caution.
 
 ## Architecture
 
@@ -26,10 +25,6 @@ servers behind Cloudflare Tunnels (WebSocket-only connectivity).
 │  ├────────────────────────────────────────────┤  │
 │  │ Transport: WebSocket (wss://) via strophe  │  │
 │  └────────────────────────────────────────────┘  │
-├─────────────────────────────────────────────────┤
-│          Cloudflare Tunnel (wss://)              │
-├─────────────────────────────────────────────────┤
-│            Prosody XMPP Server                   │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -71,6 +66,8 @@ npx cap open ios
 
 ## Project Structure
 
+Not really accurate but gives a sense of the thing.
+
 ```
 src/
 ├── main.tsx                 # App entrypoint
@@ -99,30 +96,6 @@ src/
     └── xmpp-helpers.ts      # JID parsing, time formatting
 ```
 
-## Key Design Decisions
-
-### Why @converse/headless?
-It provides a complete, battle-tested XMPP implementation including
-WebSocket transport, OMEMO encryption, MAM, carbons, file upload,
-and dozens of XEPs — without any UI. We only build the frontend.
-
-### Why WebSocket?
-Standard XMPP uses raw TCP on ports 5222/5269. Behind CGNAT with
-Cloudflare Tunnels, only HTTP(S) traffic passes through. WebSocket
-(`wss://`) upgrades from HTTPS, tunneling perfectly through Cloudflare.
-
-### Why Capacitor over React Native?
-Capacitor wraps a real web app in a native shell. Since our XMPP
-logic is already web-based (strophe.js, @converse/headless), there's
-zero rewrite. We get native push notifications, filesystem access,
-and app store distribution while keeping one codebase.
-
-### Why Zustand over Redux/Context?
-Zustand is tiny (~1KB), has no boilerplate, works outside React
-components (important for XMPP event handlers that fire from
-strophe.js callbacks), and supports subscriptions with selectors
-for efficient re-renders.
-
 ## WebSocket Configuration
 
 The app connects via WebSocket, discovered through XEP-0156:
@@ -136,48 +109,17 @@ Or configured directly:
 websocket_url: 'wss://xmpp.example.com/xmpp-websocket'
 ```
 
-## Server Setup (Prosody behind Cloudflare Tunnel)
-
-```yaml
-# cloudflared config.yml
-ingress:
-  - hostname: xmpp.example.com
-    service: http://localhost:5280
-  - service: http_status:404
-```
-
-```lua
--- prosody.cfg.lua
-modules_enabled = { "websocket"; "bosh"; }
-cross_domain_websocket = true
-consider_websocket_secure = true
-trusted_proxies = { "127.0.0.1", "::1" }
-```
-
-Serve `/.well-known/host-meta.json` on your domain:
-```json
-{
-  "links": [
-    {
-      "rel": "urn:xmpp:alt-connections:websocket",
-      "href": "wss://xmpp.example.com/xmpp-websocket"
-    }
-  ]
-}
-```
-
 ## Roadmap
 
 - [x] Project architecture
-- [ ] XMPP connection via WebSocket
-- [ ] Login / authentication
-- [ ] Roster display with presence
-- [ ] 1:1 chat with message history (MAM)
+- [x] XMPP connection via WebSocket
+- [x] Login / authentication
+- [~] Roster display with presence
+- [~] 1:1 chat with message history (MAM)
 - [ ] Message carbons (multi-device)
 - [ ] HTTP file upload (images)
-- [ ] OMEMO encryption
+- [x] OMEMO encryption
 - [ ] Push notifications (FCM/APNs via Capacitor)
-- [ ] Group chat (MUC)
-- [ ] Voice/video calls (Jingle + WebRTC)
+- [~] Group chat (MUC)
 - [ ] iOS build
-- [ ] F-Droid / Play Store release
+- [ ] Android build
