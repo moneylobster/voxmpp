@@ -2,30 +2,32 @@
 
 An XMPP chat client built on `@converse/headless`. Caveat Emptor: entirely vibecoded, treat with caution.
 
+Doesn't really work well yet.
+
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────┐
 │                   Capacitor                      │
 │  (Native Android/iOS shell — push, filesystem)   │
-├─────────────────────────────────────────────────┤
+├──────────────────────────────────────────────────┤
 │               React UI (Vite)                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
+│  ┌──────────┐ ┌──────────┐ ┌───────────────────┐ │
 │  │  Pages   │ │Components│ │   Hooks/Context   │ │
 │  │ Login    │ │ ChatBub  │ │ useXMPP()         │ │
 │  │ Roster   │ │ Avatar   │ │ useRoster()       │ │
 │  │ Chat     │ │ Compose  │ │ useChat()         │ │
 │  │ Settings │ │ Status   │ │ usePresence()     │ │
-│  └──────────┘ └──────────┘ └──────────────────┘ │
-├─────────────────────────────────────────────────┤
+│  └──────────┘ └──────────┘ └───────────────────┘ │
+├──────────────────────────────────────────────────┤
 │             @converse/headless                   │
 │  ┌────────────────────────────────────────────┐  │
-│  │ XMPP Core: auth, roster, messaging, MAM,  │  │
+│  │ XMPP Core: auth, roster, messaging, MAM,   │  │
 │  │ OMEMO, carbons, file upload, presence      │  │
 │  ├────────────────────────────────────────────┤  │
 │  │ Transport: WebSocket (wss://) via strophe  │  │
 │  └────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+└──────────────────────────────────────────────────┘
 ```
 
 ## Stack
