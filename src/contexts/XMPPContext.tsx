@@ -228,7 +228,7 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 				}, 5000);
 			}
 		} catch (err: any) {
-			if (!hasPassword) {
+			if (!password) {
 				clearCredentials();
 			}
 			set({ status: 'error', error: err.message || 'Connection failed' });
@@ -547,7 +547,7 @@ async function syncRooms(api: any) {
 			jid: r.get('jid'),
 			name: r.get('name') || r.get('jid')?.split('@')[0] || '',
 			nick: r.get('nick') || '',
-			subject: r.get('subject')?.text || r.get('subject') || undefined,
+			subject: r.get('subject')?.text ?? undefined,
 			occupantCount: r.occupants?.length ?? 0,
 			unreadCount: 0,
 		}));
