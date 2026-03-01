@@ -47,3 +47,22 @@ export function useSendMessage() {
 export function useFetchMessages() {
   return useXMPPStore((s) => s.fetchMessages);
 }
+
+/** All joined rooms */
+export function useRooms() {
+  return useXMPPStore((s) => s.rooms);
+}
+
+/** Room actions */
+export function useRoomActions() {
+  return useXMPPStore(
+    useShallow((s) => ({
+      joinRoom: s.joinRoom,
+      leaveRoom: s.leaveRoom,
+      createRoom: s.createRoom,
+      sendRoomMessage: s.sendRoomMessage,
+      fetchRoomMessages: s.fetchRoomMessages,
+      getRoomOccupants: s.getRoomOccupants,
+    }))
+  );
+}

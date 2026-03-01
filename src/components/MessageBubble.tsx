@@ -1,13 +1,21 @@
 import type { Message } from '@/contexts/XMPPContext';
 import { formatMessageTime } from '@/utils/xmpp-helpers';
 
+function nickColor(nick: string): string {
+  const colors = ['#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#ef4444'];
+  let hash = 0;
+  for (const ch of nick) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  return colors[Math.abs(hash) % colors.length];
+}
+
 interface MessageBubbleProps {
   message: Message;
   isGrouped: boolean; // part of a consecutive group from same sender
   showTimestamp: boolean;
+  showSenderNick?: boolean;
 }
 
-export default function MessageBubble({ message, isGrouped, showTimestamp }: MessageBubbleProps) {
+export default function MessageBubble({ message, isGrouped, showTimestamp, showSenderNick }: MessageBubbleProps) {
   const isMe = message.isMe;
 
   return (
@@ -25,6 +33,13 @@ export default function MessageBubble({ message, isGrouped, showTimestamp }: Mes
           ${message.isEncrypted ? 'border border-[var(--color-amber-600)]/20' : ''}
         `}
       >
+        {/* Sender nick for group chats */}
+        {showSenderNick && message.senderNick && (
+          <p className="text-[12px] font-medium mb-0.5" style={{ color: nickColor(message.senderNick) }}>
+            {message.senderNick}
+          </p>
+        )}
+
         {/* Encryption indicator */}
         {message.isEncrypted && (
           <span className="inline-flex items-center gap-1 text-[11px] text-[var(--color-amber-400)] mb-1">

@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage';
 import RosterPage from './pages/RosterPage';
 import ChatPage from './pages/ChatPage';
 import SettingsPage from './pages/SettingsPage';
+import RoomPage from './pages/RoomPage';
 import { useXMPPStore } from './contexts/XMPPContext';
 import { loadStoredCredentials } from './contexts/XMPPContext';
 
@@ -64,6 +65,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ChatPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/room/:jid"
+          element={
+            <RequireAuth>
+              <RoomPage />
             </RequireAuth>
           }
         />

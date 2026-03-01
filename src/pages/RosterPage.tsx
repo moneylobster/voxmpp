@@ -1,16 +1,22 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRoster, useActiveChat, useXMPP } from '@/hooks/useXMPP';
+import { useRoster, useActiveChat, useXMPP, useRooms, useRoomActions } from '@/hooks/useXMPP';
 import ContactItem from '@/components/ContactItem';
+import RoomItem from '@/components/RoomItem';
 import { jidToLocal } from '@/utils/xmpp-helpers';
 
 export default function RosterPage() {
   const navigate = useNavigate();
   const contacts = useRoster();
+  const rooms = useRooms();
+  const { joinRoom } = useRoomActions();
   const { activeChatJid, setActiveChat, markRead } = useActiveChat();
   const { myJid, status } = useXMPP();
   const [showNewChat, setShowNewChat] = useState(false);
+  const [newChatTab, setNewChatTab] = useState<'chat' | 'room'>('chat');
   const [newChatJid, setNewChatJid] = useState('');
+  const [newRoomJid, setNewRoomJid] = useState('');
+  const [newRoomNick, setNewRoomNick] = useState('');
 
   const handleTapContact = (jid: string) => {
     setActiveChat(jid);
@@ -87,8 +93,28 @@ export default function RosterPage() {
             />
           ))
         )}
+
+        {/* Rooms section */}
+        {rooms.length > 0 && (
+          <>
+            <div className="px-5 pt-4 pb-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Rooms</p>
+            </div>
+            {rooms.map((room) => (
+              <RoomItem
+                key={room.jid}
+                room={room}
+                isActive={activeChatJid === room.jid}
+                onTap={() => {
+                  setActiveChat(room.jid);
+                  navigate(`/room/${encodeURIComponent(room.jid)}`);
+                }}
+              />
+            ))}
+          </>
+        )}
       </div>
-      {/* New Chat Modal */}
+      {/* New Chat / Join Room Modal */}
       {showNewChat && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -98,43 +124,111 @@ export default function RosterPage() {
             className="bg-[var(--color-surface-1)] rounded-2xl p-6 w-[90%] max-w-sm shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--color-text-primary)' }}>
-              New Chat
-            </h2>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const jid = newChatJid.trim();
-                if (!jid) return;
-                setShowNewChat(false);
-                setNewChatJid('');
-                navigate(`/chat/${encodeURIComponent(jid)}`);
-              }}
-            >
-              <input
-                autoFocus
-                type="text"
-                placeholder="user@example.com"
-                value={newChatJid}
-                onChange={(e) => setNewChatJid(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl bg-[var(--color-surface-2)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:ring-2 focus:ring-[var(--color-amber-400)] mb-4"
-              />
-              <div className="flex gap-3 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowNewChat(false)}
-                  className="px-4 py-2 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-sm font-medium bg-[var(--color-amber-500)] text-black hover:bg-[var(--color-amber-400)] transition-colors"
-                >
-                  Start Chat
-                </button>
-              </div>
-            </form>
+            {/* Tabs */}
+            <div className="flex gap-1 mb-4 bg-[var(--color-surface-2)] rounded-xl p-1">
+              <button
+                onClick={() => setNewChatTab('chat')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  newChatTab === 'chat'
+                    ? 'bg-[var(--color-amber-500)] text-black'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => setNewChatTab('room')}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  newChatTab === 'room'
+                    ? 'bg-[var(--color-amber-500)] text-black'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+                }`}
+              >
+                Room
+              </button>
+            </div>
+
+            {newChatTab === 'chat' ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const jid = newChatJid.trim();
+                  if (!jid) return;
+                  setShowNewChat(false);
+                  setNewChatJid('');
+                  navigate(`/chat/${encodeURIComponent(jid)}`);
+                }}
+              >
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="user@example.com"
+                  value={newChatJid}
+                  onChange={(e) => setNewChatJid(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-[var(--color-surface-2)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:ring-2 focus:ring-[var(--color-amber-400)] mb-4"
+                />
+                <div className="flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewChat(false)}
+                    className="px-4 py-2 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl text-sm font-medium bg-[var(--color-amber-500)] text-black hover:bg-[var(--color-amber-400)] transition-colors"
+                  >
+                    Start Chat
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const roomJid = newRoomJid.trim();
+                  const nick = newRoomNick.trim() || (myJid ? jidToLocal(myJid) : 'user');
+                  if (!roomJid) return;
+                  setShowNewChat(false);
+                  setNewRoomJid('');
+                  setNewRoomNick('');
+                  await joinRoom(roomJid, nick);
+                  navigate(`/room/${encodeURIComponent(roomJid)}`);
+                }}
+              >
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="room@conference.example.com"
+                  value={newRoomJid}
+                  onChange={(e) => setNewRoomJid(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-[var(--color-surface-2)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:ring-2 focus:ring-[var(--color-amber-400)] mb-3"
+                />
+                <input
+                  type="text"
+                  placeholder={`Nickname (default: ${myJid ? jidToLocal(myJid) : 'user'})`}
+                  value={newRoomNick}
+                  onChange={(e) => setNewRoomNick(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-[var(--color-surface-2)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none focus:ring-2 focus:ring-[var(--color-amber-400)] mb-4"
+                />
+                <div className="flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewChat(false)}
+                    className="px-4 py-2 rounded-xl text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl text-sm font-medium bg-[var(--color-amber-500)] text-black hover:bg-[var(--color-amber-400)] transition-colors"
+                  >
+                    Join Room
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

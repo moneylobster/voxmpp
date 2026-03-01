@@ -32,6 +32,25 @@ export interface Message {
 	isEncrypted: boolean;
 	status: 'sending' | 'sent' | 'delivered' | 'read' | 'error';
 	oobUrl?: string; // out-of-band file URL
+	senderNick?: string; // nickname in group chat
+}
+
+export interface Room {
+	jid: string;
+	name: string;
+	nick: string;
+	subject?: string;
+	occupantCount: number;
+	unreadCount: number;
+	lastMessage?: string;
+	lastMessageTime?: string;
+}
+
+export interface RoomOccupant {
+	nick: string;
+	jid?: string;
+	role: string;
+	affiliation: string;
 }
 
 export type ConnectionStatus =
@@ -56,6 +75,9 @@ export interface XMPPState {
 	activeChatJid: string | null;
 	messages: Record<string, Message[]>; // keyed by bare JID
 
+	// Rooms
+	rooms: Room[];
+
 	// Actions (called from UI)
 	connect: (jid: string, password: string, websocketUrl: string) => Promise<void>;
 	disconnect: () => void;
@@ -63,6 +85,14 @@ export interface XMPPState {
 	fetchMessages: (jid: string) => Promise<void>;
 	setActiveChat: (jid: string | null) => void;
 	markRead: (jid: string) => void;
+
+	// Room actions
+	joinRoom: (roomJid: string, nick: string) => Promise<void>;
+	leaveRoom: (roomJid: string) => Promise<void>;
+	createRoom: (roomJid: string, nick: string, config: { name?: string; persistent?: boolean; membersOnly?: boolean; description?: string }) => Promise<void>;
+	sendRoomMessage: (roomJid: string, body: string) => void;
+	fetchRoomMessages: (roomJid: string) => Promise<void>;
+	getRoomOccupants: (roomJid: string) => Promise<RoomOccupant[]>;
 
 	// Internal actions (called from converse event handlers)
 	_setStatus: (status: ConnectionStatus) => void;
@@ -114,6 +144,7 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 	contacts: [],
 	activeChatJid: null,
 	messages: {},
+	rooms: [],
 
 	connect: async (jid, password, websocketUrl) => {
 		set({ status: 'connecting', error: null });
@@ -152,7 +183,12 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 
 					// ── Messages ──
 					api.listen.on('message', (data: any) => {
-						handleIncomingMessage(data, get().myJid);
+						const stanza = data?.stanza;
+						if (stanza?.getAttribute('type') === 'groupchat') {
+							handleGroupMessage(data, get().myJid);
+						} else {
+							handleIncomingMessage(data, get().myJid);
+						}
 					});
 
 					// Outgoing messages are added optimistically in sendMessage()
@@ -313,6 +349,152 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 					: c
 			),
 		})),
+
+	_setRooms: (rooms) => set({ rooms }),
+
+	_updateRoomLastMessage: (jid, body, time) =>
+		set((state) => ({
+			rooms: state.rooms.map((r) =>
+				r.jid === jid
+					? {
+						...r,
+						lastMessage: body,
+						lastMessageTime: time,
+						unreadCount: state.activeChatJid === jid ? 0 : r.unreadCount + 1,
+					}
+					: r
+			),
+		})),
+
+	// ── Room actions ──
+	joinRoom: async (roomJid, nick) => {
+		try {
+			if (!converseApi) throw new Error('Not connected');
+			await converseApi.rooms.get(roomJid, { nick }, true);
+			await syncRooms(converseApi);
+		} catch (err) {
+			console.error('Failed to join room:', err);
+		}
+	},
+
+	leaveRoom: async (roomJid) => {
+		try {
+			if (!converseApi) throw new Error('Not connected');
+			const room = await converseApi.rooms.get(roomJid);
+			if (room) {
+				await room.leave();
+			}
+			set((state) => ({
+				rooms: state.rooms.filter((r) => r.jid !== roomJid),
+			}));
+		} catch (err) {
+			console.error('Failed to leave room:', err);
+		}
+	},
+
+	createRoom: async (roomJid, nick, config) => {
+		try {
+			if (!converseApi) throw new Error('Not connected');
+			await converseApi.rooms.get(roomJid, {
+				nick,
+				roomconfig: {
+					roomname: config.name || roomJid.split('@')[0],
+					persistentroom: config.persistent ?? true,
+					membersonly: config.membersOnly ?? false,
+					roomdesc: config.description || '',
+				},
+			}, true);
+			await syncRooms(converseApi);
+		} catch (err) {
+			console.error('Failed to create room:', err);
+		}
+	},
+
+	sendRoomMessage: async (roomJid, body) => {
+		try {
+			if (!converseApi) throw new Error('Not connected');
+
+			const myJid = get().myJid;
+			const msg: Message = {
+				id: crypto.randomUUID(),
+				from: myJid || '',
+				to: roomJid,
+				body,
+				time: new Date().toISOString(),
+				isMe: true,
+				isEncrypted: false,
+				status: 'sending',
+			};
+			get()._addMessage(roomJid, msg);
+
+			const room = await converseApi.rooms.get(roomJid);
+			if (room) {
+				room.sendMessage({ body });
+			}
+		} catch (err) {
+			console.error('Failed to send room message:', err);
+		}
+	},
+
+	fetchRoomMessages: async (roomJid) => {
+		try {
+			if (!converseApi) return;
+			const room = await converseApi.rooms.get(roomJid);
+			if (!room) return;
+
+			await room.messages?.fetched;
+
+			const myJid = get().myJid;
+			const myNick = room.get?.('nick');
+			const models = room.messages?.models ?? [];
+			const msgs: Message[] = models
+				.filter((m: any) => m.get('body') || m.get('plaintext'))
+				.map((m: any) => {
+					const nick = m.get('nick') || m.get('from')?.split('/')[1] || '';
+					const isMine = m.get('sender') === 'me' || nick === myNick;
+					return {
+						id: m.get('origin_id') || m.get('msgid') || m.id || crypto.randomUUID(),
+						from: m.get('from')?.split('/')[0] || '',
+						to: roomJid,
+						body: m.get('plaintext') || m.get('body'),
+						time: m.get('time') || new Date().toISOString(),
+						isMe: isMine,
+						isEncrypted: m.get('is_encrypted') || false,
+						status: 'delivered' as const,
+						senderNick: isMine ? undefined : nick,
+					};
+				});
+
+			if (msgs.length > 0) {
+				set((state) => ({
+					messages: {
+						...state.messages,
+						[roomJid]: msgs,
+					},
+				}));
+			}
+		} catch (err) {
+			console.error('Failed to fetch room messages:', err);
+		}
+	},
+
+	getRoomOccupants: async (roomJid) => {
+		try {
+			if (!converseApi) return [];
+			const room = await converseApi.rooms.get(roomJid);
+			if (!room) return [];
+			const models = room.occupants?.models ?? [];
+			return models.map((o: any) => ({
+				nick: o.get('nick') || '',
+				jid: o.get('jid') || undefined,
+				role: o.get('role') || 'none',
+				affiliation: o.get('affiliation') || 'none',
+			}));
+		} catch (err) {
+			console.error('Failed to get room occupants:', err);
+			return [];
+		}
+	},
 }));
 
 // ─── Helper functions ────────────────────────────────────────────
@@ -355,6 +537,45 @@ function handleIncomingMessage(data: any, myJid: string | null) {
 	const store = useXMPPStore.getState();
 	store._addMessage(from, message);
 	store._updateContactLastMessage(from, body, message.time);
+}
+
+async function syncRooms(api: any) {
+	try {
+		const roomModels = await api.rooms.get();
+		if (!Array.isArray(roomModels)) return;
+		const rooms: Room[] = roomModels.map((r: any) => ({
+			jid: r.get('jid'),
+			name: r.get('name') || r.get('jid')?.split('@')[0] || '',
+			nick: r.get('nick') || '',
+			subject: r.get('subject')?.text || r.get('subject') || undefined,
+			occupantCount: r.occupants?.length ?? 0,
+			unreadCount: 0,
+		}));
+		useXMPPStore.getState()._setRooms(rooms);
+	} catch (err) {
+		console.error('Failed to sync rooms:', err);
+	}
+}
+
+function handleGroupMessage(data: any, myJid: string | null) {
+	const { stanza } = data;
+	if (!stanza) return;
+
+	const fullFrom = stanza.getAttribute('from') || '';
+	const roomJid = fullFrom.split('/')[0];
+	const senderNick = fullFrom.split('/')[1] || '';
+	const body = stanza.querySelector('body')?.textContent;
+	if (!roomJid || !body) return;
+
+	// Check if this is our own message (reflected back by the MUC)
+	const myBareJid = myJid?.split('/')[0];
+	// We can't reliably detect own messages from stanza alone in MUC,
+	// so we skip — the optimistic add in sendRoomMessage handles it.
+	// MUC reflects our messages back, so we need to check the nick.
+	// For now, don't add — fetchRoomMessages will reconcile.
+
+	const store = useXMPPStore.getState();
+	store._updateRoomLastMessage(roomJid, body, new Date().toISOString());
 }
 
 function mapPresence(show: string | undefined): Contact['presence'] {
