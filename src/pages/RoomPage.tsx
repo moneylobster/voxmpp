@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useChat, useActiveChat, useRoomActions } from '@/hooks/useXMPP';
+import { useChat, useActiveChat, useRoomActions, useFileUpload } from '@/hooks/useXMPP';
 import { useXMPPStore, type RoomOccupant } from '@/contexts/XMPPContext';
 import MessageBubble from '@/components/MessageBubble';
 import ComposeBar from '@/components/ComposeBar';
@@ -13,6 +13,7 @@ export default function RoomPage() {
 
   const messages = useChat(decodedJid);
   const { sendRoomMessage, fetchRoomMessages, leaveRoom, getRoomOccupants } = useRoomActions();
+  const { sendRoomFileMessage } = useFileUpload();
   const { setActiveChat, markRead } = useActiveChat();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showOccupants, setShowOccupants] = useState(false);
@@ -49,6 +50,12 @@ export default function RoomPage() {
   const handleSend = (body: string) => {
     if (decodedJid) {
       sendRoomMessage(decodedJid, body);
+    }
+  };
+
+  const handleFileSelect = async (file: File) => {
+    if (decodedJid) {
+      await sendRoomFileMessage(decodedJid, file);
     }
   };
 
@@ -169,7 +176,7 @@ export default function RoomPage() {
       </div>
 
       {/* Compose */}
-      <ComposeBar onSend={handleSend} />
+      <ComposeBar onSend={handleSend} onFileSelect={handleFileSelect} />
     </div>
   );
 }

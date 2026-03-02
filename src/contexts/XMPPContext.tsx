@@ -87,6 +87,10 @@ export interface XMPPState {
 	setActiveChat: (jid: string | null) => void;
 	markRead: (jid: string) => void;
 
+	// File upload
+	sendFileMessage: (to: string, file: File) => Promise<void>;
+	sendRoomFileMessage: (roomJid: string, file: File) => Promise<void>;
+
 	// Room actions
 	joinRoom: (roomJid: string, nick: string) => Promise<void>;
 	leaveRoom: (roomJid: string) => Promise<void>;
@@ -269,6 +273,28 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 		}
 	},
 
+	sendFileMessage: async (to, file) => {
+		try {
+			if (!converseApi) throw new Error('Not connected');
+			const chat = await converseApi.chats.get(to, {}, true);
+			if (!chat) throw new Error('Could not open chat');
+			await chat.sendFiles([file]);
+		} catch (err) {
+			console.error('Failed to send file:', err);
+		}
+	},
+
+	sendRoomFileMessage: async (roomJid, file) => {
+		try {
+			if (!converseApi) throw new Error('Not connected');
+			const room = await converseApi.rooms.get(roomJid);
+			if (!room) throw new Error('Could not open room');
+			await room.sendFiles([file]);
+		} catch (err) {
+			console.error('Failed to send file to room:', err);
+		}
+	},
+
 	fetchMessages: async (jid) => {
 		try {
 			if (!converseApi) return;
@@ -282,16 +308,17 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			const myJid = get().myJid;
 			const models = chat.messages?.models ?? [];
 			const msgs: Message[] = models
-				.filter((m: any) => m.get('body') || m.get('plaintext'))
+				.filter((m: any) => m.get('body') || m.get('plaintext') || m.get('oob_url'))
 				.map((m: any) => ({
 					id: m.get('origin_id') || m.get('msgid') || m.id || crypto.randomUUID(),
 					from: m.get('from')?.split('/')[0] || '',
 					to: m.get('to')?.split('/')[0] || '',
-					body: m.get('plaintext') || m.get('body'),
+					body: m.get('plaintext') || m.get('body') || '',
 					time: m.get('time') || new Date().toISOString(),
 					isMe: m.get('sender') === 'me' || m.get('from')?.split('/')[0] === myJid?.split('/')[0],
 					isEncrypted: m.get('is_encrypted') || false,
 					status: m.get('received') ? 'delivered' : 'sent',
+					oobUrl: m.get('oob_url') || undefined,
 				}));
 
 			if (msgs.length > 0) {
@@ -449,7 +476,7 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			const myNick = room.get?.('nick');
 			const models = room.messages?.models ?? [];
 			const msgs: Message[] = models
-				.filter((m: any) => m.get('body') || m.get('plaintext'))
+				.filter((m: any) => m.get('body') || m.get('plaintext') || m.get('oob_url'))
 				.map((m: any) => {
 					const nick = m.get('nick') || m.get('from')?.split('/')[1] || '';
 					const isMine = m.get('sender') === 'me' || nick === myNick;
@@ -457,12 +484,13 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 						id: m.get('origin_id') || m.get('msgid') || m.id || crypto.randomUUID(),
 						from: m.get('from')?.split('/')[0] || '',
 						to: roomJid,
-						body: m.get('plaintext') || m.get('body'),
+						body: m.get('plaintext') || m.get('body') || '',
 						time: m.get('time') || new Date().toISOString(),
 						isMe: isMine,
 						isEncrypted: m.get('is_encrypted') || false,
 						status: 'delivered' as const,
 						senderNick: isMine ? undefined : nick,
+						oobUrl: m.get('oob_url') || undefined,
 					};
 				});
 
@@ -522,17 +550,20 @@ function handleIncomingMessage(data: any, myJid: string | null) {
 
 	const from = stanza.getAttribute('from')?.split('/')[0];
 	const body = stanza.querySelector('body')?.textContent;
-	if (!from || !body) return;
+	const oobEl = stanza.querySelector('x[xmlns="jabber:x:oob"] url');
+	const oobUrl = oobEl?.textContent || undefined;
+	if (!from || (!body && !oobUrl)) return;
 
 	const message: Message = {
 		id: stanza.getAttribute('id') || crypto.randomUUID(),
 		from,
 		to: myJid || '',
-		body,
+		body: body || '',
 		time: new Date().toISOString(),
 		isMe: false,
 		isEncrypted: false,
 		status: 'delivered',
+		oobUrl,
 	};
 
 	const store = useXMPPStore.getState();

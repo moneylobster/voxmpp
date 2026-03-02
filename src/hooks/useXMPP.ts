@@ -48,6 +48,16 @@ export function useFetchMessages() {
   return useXMPPStore((s) => s.fetchMessages);
 }
 
+/** File upload actions */
+export function useFileUpload() {
+  return useXMPPStore(
+    useShallow((s) => ({
+      sendFileMessage: s.sendFileMessage,
+      sendRoomFileMessage: s.sendRoomFileMessage,
+    }))
+  );
+}
+
 /** All joined rooms */
 export function useRooms() {
   return useXMPPStore((s) => s.rooms);
