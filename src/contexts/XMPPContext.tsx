@@ -8,6 +8,7 @@
  */
 
 import { create } from 'zustand';
+import { showMessageNotification } from '@/hooks/useNotifications';
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -537,6 +538,16 @@ function handleIncomingMessage(data: any, myJid: string | null) {
 	const store = useXMPPStore.getState();
 	store._addMessage(from, message);
 	store._updateContactLastMessage(from, body, message.time);
+
+	// Fire local notification if this chat isn't active
+	if (store.activeChatJid !== from) {
+		const contact = store.contacts.find((c) => c.jid === from);
+		showMessageNotification({
+			title: contact?.name || from.split('@')[0],
+			body,
+			jid: from,
+		});
+	}
 }
 
 async function syncRooms(api: any) {
@@ -548,7 +559,7 @@ async function syncRooms(api: any) {
 			name: r.get('name') || r.get('jid')?.split('@')[0] || '',
 			nick: r.get('nick') || '',
 			subject: r.get('subject')?.text ?? undefined,
-			occupantCount: r.occupants?.length ?? 0,
+			occupantCount: r.occupants?.models?.length ?? 0,
 			unreadCount: 0,
 		}));
 		useXMPPStore.getState()._setRooms(rooms);
@@ -576,6 +587,17 @@ function handleGroupMessage(data: any, myJid: string | null) {
 
 	const store = useXMPPStore.getState();
 	store._updateRoomLastMessage(roomJid, body, new Date().toISOString());
+
+	// Fire local notification if this room isn't active
+	if (store.activeChatJid !== roomJid) {
+		const room = store.rooms.find((r) => r.jid === roomJid);
+		showMessageNotification({
+			title: room?.name || roomJid.split('@')[0],
+			body: senderNick ? `${senderNick}: ${body}` : body,
+			jid: roomJid,
+			isRoom: true,
+		});
+	}
 }
 
 function mapPresence(show: string | undefined): Contact['presence'] {

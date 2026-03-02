@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import RosterPage from './pages/RosterPage';
 import ChatPage from './pages/ChatPage';
@@ -7,6 +7,7 @@ import SettingsPage from './pages/SettingsPage';
 import RoomPage from './pages/RoomPage';
 import { useXMPPStore } from './contexts/XMPPContext';
 import { loadStoredCredentials } from './contexts/XMPPContext';
+import { useNotifications } from './hooks/useNotifications';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const status = useXMPPStore((s) => s.status);
@@ -31,6 +32,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function NotificationSetup() {
+  const navigate = useNavigate();
+  useNotifications(navigate);
+  return null;
+}
+
 function AutoConnect() {
   const status = useXMPPStore((s) => s.status);
   const connect = useXMPPStore((s) => s.connect);
@@ -50,6 +57,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AutoConnect />
+      <NotificationSetup />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
