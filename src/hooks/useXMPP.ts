@@ -58,6 +58,16 @@ export function useFileUpload() {
   );
 }
 
+/** Whether messages are being fetched for a specific JID */
+export function useFetchingMessages(jid: string | null) {
+  return useXMPPStore((s) => (jid ? (s.fetchingMessages[jid] ?? false) : false));
+}
+
+/** Whether the roster is being fetched */
+export function useFetchingRoster() {
+  return useXMPPStore((s) => s.fetchingRoster);
+}
+
 /** All joined rooms */
 export function useRooms() {
   return useXMPPStore((s) => s.rooms);

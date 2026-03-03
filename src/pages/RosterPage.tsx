@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRoster, useActiveChat, useXMPP, useRooms, useRoomActions } from '@/hooks/useXMPP';
+import { useRoster, useActiveChat, useXMPP, useRooms, useRoomActions, useFetchingRoster } from '@/hooks/useXMPP';
 import ContactItem from '@/components/ContactItem';
 import RoomItem from '@/components/RoomItem';
 import { jidToLocal } from '@/utils/xmpp-helpers';
@@ -8,6 +8,7 @@ import { jidToLocal } from '@/utils/xmpp-helpers';
 export default function RosterPage() {
   const navigate = useNavigate();
   const contacts = useRoster();
+  const fetchingRoster = useFetchingRoster();
   const rooms = useRooms();
   const { joinRoom } = useRoomActions();
   const { activeChatJid, setActiveChat, markRead } = useActiveChat();
@@ -75,13 +76,25 @@ export default function RosterPage() {
       <div className="flex-1 overflow-y-auto">
         {contacts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-[var(--color-text-muted)]">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-4 opacity-40">
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" strokeLinecap="round" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" strokeLinecap="round" />
-            </svg>
-            <p className="text-sm">No contacts yet</p>
-            <p className="text-xs mt-1 opacity-60">Add contacts to start chatting</p>
+            {fetchingRoster ? (
+              <>
+                <svg className="animate-spin w-6 h-6 text-[var(--color-amber-500)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 019.95 9" />
+                </svg>
+                <p className="text-sm mt-3">Loading contacts…</p>
+              </>
+            ) : (
+              <>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mb-4 opacity-40">
+                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" strokeLinecap="round" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" strokeLinecap="round" />
+                </svg>
+                <p className="text-sm">No contacts yet</p>
+                <p className="text-xs mt-1 opacity-60">Add contacts to start chatting</p>
+              </>
+            )}
           </div>
         ) : (
           contacts.map((contact) => (

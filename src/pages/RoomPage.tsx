@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useChat, useActiveChat, useRoomActions, useFileUpload } from '@/hooks/useXMPP';
+import { useChat, useActiveChat, useRoomActions, useFetchingMessages, useFileUpload } from '@/hooks/useXMPP';
 import { useXMPPStore, type RoomOccupant } from '@/contexts/XMPPContext';
 import MessageBubble from '@/components/MessageBubble';
 import ComposeBar from '@/components/ComposeBar';
@@ -12,6 +12,7 @@ export default function RoomPage() {
   const decodedJid = jid ? decodeURIComponent(jid) : null;
 
   const messages = useChat(decodedJid);
+  const fetching = useFetchingMessages(decodedJid);
   const { sendRoomMessage, fetchRoomMessages, leaveRoom, getRoomOccupants } = useRoomActions();
   const { sendRoomFileMessage } = useFileUpload();
   const { setActiveChat, markRead } = useActiveChat();
@@ -130,7 +131,17 @@ export default function RoomPage() {
         <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll px-4 py-4">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)] opacity-60">
-              <p className="text-sm">No messages yet</p>
+              {fetching ? (
+                <>
+                  <svg className="animate-spin w-6 h-6 text-[var(--color-amber-500)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                    <path d="M12 2a10 10 0 019.95 9" />
+                  </svg>
+                  <p className="text-sm mt-3">Loading messages…</p>
+                </>
+              ) : (
+                <p className="text-sm">No messages yet</p>
+              )}
             </div>
           ) : (
             messages.map((msg, i) => {

@@ -71,10 +71,12 @@ export interface XMPPState {
 
 	// Roster
 	contacts: Contact[];
+	fetchingRoster: boolean;
 
 	// Active chat
 	activeChatJid: string | null;
 	messages: Record<string, Message[]>; // keyed by bare JID
+	fetchingMessages: Record<string, boolean>; // per-JID fetch status
 
 	// Rooms
 	rooms: Room[];
@@ -147,8 +149,10 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 	myJid: null,
 	error: null,
 	contacts: [],
+	fetchingRoster: false,
 	activeChatJid: null,
 	messages: {},
+	fetchingMessages: {},
 	rooms: [],
 
 	connect: async (jid, password, websocketUrl) => {
@@ -178,8 +182,10 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 					api.listen.on('disconnected', () => set({ status: 'disconnected' }));
 
 					// ── Roster ──
+					set({ fetchingRoster: true });
 					api.listen.on('rosterContactsFetched', () => {
 						syncRoster(api);
+						set({ fetchingRoster: false });
 					});
 
 					api.listen.on('presenceChanged', () => {
@@ -298,6 +304,7 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 	fetchMessages: async (jid) => {
 		try {
 			if (!converseApi) return;
+			set((state) => ({ fetchingMessages: { ...state.fetchingMessages, [jid]: true } }));
 			// Open/get the chatbox — this triggers converse's built-in MAM fetch
 			const chat = await converseApi.chats.get(jid, {}, true);
 			if (!chat) return;
@@ -331,6 +338,8 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			}
 		} catch (err) {
 			console.error('Failed to fetch messages:', err);
+		} finally {
+			set((state) => ({ fetchingMessages: { ...state.fetchingMessages, [jid]: false } }));
 		}
 	},
 
@@ -467,6 +476,7 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 	fetchRoomMessages: async (roomJid) => {
 		try {
 			if (!converseApi) return;
+			set((state) => ({ fetchingMessages: { ...state.fetchingMessages, [roomJid]: true } }));
 			const room = await converseApi.rooms.get(roomJid);
 			if (!room) return;
 
@@ -504,6 +514,8 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			}
 		} catch (err) {
 			console.error('Failed to fetch room messages:', err);
+		} finally {
+			set((state) => ({ fetchingMessages: { ...state.fetchingMessages, [roomJid]: false } }));
 		}
 	},
 
