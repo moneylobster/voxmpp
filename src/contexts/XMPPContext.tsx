@@ -71,7 +71,6 @@ export interface XMPPState {
 
 	// Roster
 	contacts: Contact[];
-	fetchingRoster: boolean;
 
 	// Active chat
 	activeChatJid: string | null;
@@ -142,6 +141,15 @@ function clearCredentials() {
 
 let converseApi: any = null;
 
+/** Wait for OMEMO to initialize, with a timeout so we don't hang forever */
+function waitForOMEMO(timeoutMs = 10_000): Promise<void> {
+	if (!converseApi) return Promise.resolve();
+	return Promise.race([
+		converseApi.waitUntil('OMEMOInitialized'),
+		new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+	]);
+}
+
 // ─── Store ───────────────────────────────────────────────────────
 
 export const useXMPPStore = create<XMPPState>((set, get) => ({
@@ -149,7 +157,6 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 	myJid: null,
 	error: null,
 	contacts: [],
-	fetchingRoster: false,
 	activeChatJid: null,
 	messages: {},
 	fetchingMessages: {},
@@ -161,6 +168,12 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 		try {
 			// Dynamic import — @converse/headless is heavy, only load when needed
 			const converse = (await import('@converse/headless')).default;
+
+			// Tear down any previous session (e.g. after HMR or page refresh)
+			if (converseApi) {
+				try { await converse.tearDown(); } catch (_) {}
+				converseApi = null;
+			}
 
 			// Register bridge plugin BEFORE initialize (skip if already registered after HMR)
 			try { converse.plugins.add('vox-bridge', {
@@ -174,18 +187,18 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 						const myJid = api.connection.get()?.jid || jid;
 						set({ status: 'connected', myJid });
 						saveCredentials({ jid, websocketUrl });
-						// Sync joined rooms after connection
+						// Sync joined rooms after connection (retry a few times since rooms may not be ready immediately)
 						setTimeout(() => syncRooms(api), 1000);
-					});
+						setTimeout(() => syncRooms(api), 3000);
+						setTimeout(() => syncRooms(api), 6000);
+						});
 
 					api.listen.on('reconnected', () => set({ status: 'connected' }));
 					api.listen.on('disconnected', () => set({ status: 'disconnected' }));
 
 					// ── Roster ──
-					set({ fetchingRoster: true });
 					api.listen.on('rosterContactsFetched', () => {
 						syncRoster(api);
-						set({ fetchingRoster: false });
 					});
 
 					api.listen.on('presenceChanged', () => {
@@ -223,10 +236,17 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 				auto_reconnect: true,
 				auto_register_muc_nickname: true,
 
+				// Persist OMEMO sessions across page loads
+				trusted: true,
+				clear_cache_on_logout: false,
+
+				// Disable stream management to avoid conflicts on re-initialization
+				enable_smacks: false,
+
 				// OMEMO
 				omemo_default: true,
 
-				whitelisted_plugins: ['vox-bridge', 'converse-profile'],
+				whitelisted_plugins: ['vox-bridge'],
 			});
 
 			// If restoring session (no password), give it time then check
@@ -253,13 +273,14 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 	},
 
 	sendMessage: async (to, body) => {
+		const msgId = crypto.randomUUID();
 		try {
 			if (!converseApi) throw new Error('Not connected');
 
 			// Add to store immediately so UI updates instantly
 			const myJid = get().myJid;
 			const msg: Message = {
-				id: crypto.randomUUID(),
+				id: msgId,
 				from: myJid || '',
 				to,
 				body,
@@ -274,8 +295,25 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			if (chat) {
 				chat.sendMessage({ body });
 			}
+			// Update status to 'sent'
+			set((state) => ({
+				messages: {
+					...state.messages,
+					[to]: (state.messages[to] || []).map((m) =>
+						m.id === msgId ? { ...m, status: 'sent' } : m
+					),
+				},
+			}));
 		} catch (err) {
 			console.error('Failed to send message:', err);
+			set((state) => ({
+				messages: {
+					...state.messages,
+					[to]: (state.messages[to] || []).map((m) =>
+						m.id === msgId ? { ...m, status: 'error' } : m
+					),
+				},
+			}));
 		}
 	},
 
@@ -305,6 +343,8 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 		try {
 			if (!converseApi) return;
 			set((state) => ({ fetchingMessages: { ...state.fetchingMessages, [jid]: true } }));
+			// Wait for OMEMO to initialize so archived messages can be decrypted
+			await waitForOMEMO();
 			// Open/get the chatbox — this triggers converse's built-in MAM fetch
 			const chat = await converseApi.chats.get(jid, {}, true);
 			if (!chat) return;
@@ -314,28 +354,45 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 
 			const myJid = get().myJid;
 			const models = chat.messages?.models ?? [];
-			const msgs: Message[] = models
-				.filter((m: any) => m.get('body') || m.get('plaintext') || m.get('oob_url'))
-				.map((m: any) => ({
-					id: m.get('origin_id') || m.get('msgid') || m.id || crypto.randomUUID(),
-					from: m.get('from')?.split('/')[0] || '',
-					to: m.get('to')?.split('/')[0] || '',
-					body: m.get('plaintext') || m.get('body') || '',
-					time: m.get('time') || new Date().toISOString(),
-					isMe: m.get('sender') === 'me' || m.get('from')?.split('/')[0] === myJid?.split('/')[0],
-					isEncrypted: m.get('is_encrypted') || false,
-					status: m.get('received') ? 'delivered' : 'sent',
-					oobUrl: m.get('oob_url') || undefined,
-				}));
 
-			if (msgs.length > 0) {
-				set((state) => ({
-					messages: {
-						...state.messages,
-						[jid]: msgs,
-					},
-				}));
-			}
+			const msgs: Message[] = models
+				.filter((m: any) => {
+					// Skip placeholder/gap models (no from field)
+					if (!m.get('from')) return false;
+					// Must have displayable content
+					return m.get('plaintext') || m.get('body') || m.get('oob_url');
+				})
+				.map((m: any) => {
+					const isEncrypted = m.get('is_encrypted') || false;
+					const plaintext = m.get('plaintext');
+					let body = plaintext || m.get('body') || '';
+					// If encrypted but not decrypted, the body is just the OMEMO
+					// fallback text. Replace it with a useful indicator.
+					if (isEncrypted && !plaintext) {
+						body = '';
+					}
+					return {
+						id: m.get('origin_id') || m.get('msgid') || m.id || crypto.randomUUID(),
+						from: m.get('from')?.split('/')[0] || '',
+						to: m.get('to')?.split('/')[0] || '',
+						body,
+						time: m.get('time') || new Date().toISOString(),
+						isMe: m.get('sender') === 'me' || m.get('from')?.split('/')[0] === myJid?.split('/')[0],
+						isEncrypted,
+						status: m.get('received') ? 'delivered' : 'sent',
+						oobUrl: m.get('oob_url') || undefined,
+					};
+				});
+
+			// Only replace if we got at least as many messages as we already have,
+			// to avoid erasing messages added by handleIncomingMessage
+			set((state) => {
+				const existing = state.messages[jid] ?? [];
+				if (msgs.length >= existing.length) {
+					return { messages: { ...state.messages, [jid]: msgs } };
+				}
+				return state;
+			});
 		} catch (err) {
 			console.error('Failed to fetch messages:', err);
 		} finally {
@@ -448,12 +505,13 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 	},
 
 	sendRoomMessage: async (roomJid, body) => {
+		const msgId = crypto.randomUUID();
 		try {
 			if (!converseApi) throw new Error('Not connected');
 
 			const myJid = get().myJid;
 			const msg: Message = {
-				id: crypto.randomUUID(),
+				id: msgId,
 				from: myJid || '',
 				to: roomJid,
 				body,
@@ -468,8 +526,24 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			if (room) {
 				room.sendMessage({ body });
 			}
+			set((state) => ({
+				messages: {
+					...state.messages,
+					[roomJid]: (state.messages[roomJid] || []).map((m) =>
+						m.id === msgId ? { ...m, status: 'sent' } : m
+					),
+				},
+			}));
 		} catch (err) {
 			console.error('Failed to send room message:', err);
+			set((state) => ({
+				messages: {
+					...state.messages,
+					[roomJid]: (state.messages[roomJid] || []).map((m) =>
+						m.id === msgId ? { ...m, status: 'error' } : m
+					),
+				},
+			}));
 		}
 	},
 
@@ -477,6 +551,7 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 		try {
 			if (!converseApi) return;
 			set((state) => ({ fetchingMessages: { ...state.fetchingMessages, [roomJid]: true } }));
+			await waitForOMEMO();
 			const room = await converseApi.rooms.get(roomJid);
 			if (!room) return;
 
@@ -486,32 +561,40 @@ export const useXMPPStore = create<XMPPState>((set, get) => ({
 			const myNick = room.get?.('nick');
 			const models = room.messages?.models ?? [];
 			const msgs: Message[] = models
-				.filter((m: any) => m.get('body') || m.get('plaintext') || m.get('oob_url'))
+				.filter((m: any) => {
+					if (!m.get('from')) return false;
+					return m.get('plaintext') || m.get('body') || m.get('oob_url');
+				})
 				.map((m: any) => {
 					const nick = m.get('nick') || m.get('from')?.split('/')[1] || '';
 					const isMine = m.get('sender') === 'me' || nick === myNick;
+					const isEncrypted = m.get('is_encrypted') || false;
+					const plaintext = m.get('plaintext');
+					let body = plaintext || m.get('body') || '';
+					if (isEncrypted && !plaintext) {
+						body = '';
+					}
 					return {
 						id: m.get('origin_id') || m.get('msgid') || m.id || crypto.randomUUID(),
 						from: m.get('from')?.split('/')[0] || '',
 						to: roomJid,
-						body: m.get('plaintext') || m.get('body') || '',
+						body,
 						time: m.get('time') || new Date().toISOString(),
 						isMe: isMine,
-						isEncrypted: m.get('is_encrypted') || false,
+						isEncrypted,
 						status: 'delivered' as const,
 						senderNick: isMine ? undefined : nick,
 						oobUrl: m.get('oob_url') || undefined,
 					};
 				});
 
-			if (msgs.length > 0) {
-				set((state) => ({
-					messages: {
-						...state.messages,
-						[roomJid]: msgs,
-					},
-				}));
-			}
+			set((state) => {
+				const existing = state.messages[roomJid] ?? [];
+				if (msgs.length >= existing.length) {
+					return { messages: { ...state.messages, [roomJid]: msgs } };
+				}
+				return state;
+			});
 		} catch (err) {
 			console.error('Failed to fetch room messages:', err);
 		} finally {
@@ -561,26 +644,30 @@ function handleIncomingMessage(data: any, myJid: string | null) {
 	if (!stanza) return;
 
 	const from = stanza.getAttribute('from')?.split('/')[0];
+	if (!from) return;
+
+	const isEncrypted = !!stanza.querySelector('encrypted');
 	const body = stanza.querySelector('body')?.textContent;
 	const oobEl = stanza.querySelector('x[xmlns="jabber:x:oob"] url');
 	const oobUrl = oobEl?.textContent || undefined;
-	if (!from || (!body && !oobUrl)) return;
+	if (!body && !oobUrl) return;
 
 	const message: Message = {
 		id: stanza.getAttribute('id') || crypto.randomUUID(),
 		from,
 		to: myJid || '',
-		body: body || '',
+		// For encrypted messages, the stanza body is just a fallback — clear it
+		body: isEncrypted ? '' : (body || ''),
 		time: new Date().toISOString(),
 		isMe: false,
-		isEncrypted: false,
+		isEncrypted,
 		status: 'delivered',
 		oobUrl,
 	};
 
 	const store = useXMPPStore.getState();
 	store._addMessage(from, message);
-	store._updateContactLastMessage(from, body, message.time);
+	store._updateContactLastMessage(from, isEncrypted ? '' : body, message.time);
 
 	// Fire local notification if this chat isn't active
 	if (store.activeChatJid !== from) {
@@ -590,6 +677,14 @@ function handleIncomingMessage(data: any, myJid: string | null) {
 			body,
 			jid: from,
 		});
+	}
+
+	// For encrypted messages, schedule a re-fetch from converse models
+	// to replace the fallback body with decrypted plaintext
+	if (isEncrypted) {
+		setTimeout(() => {
+			useXMPPStore.getState().fetchMessages(from);
+		}, 1500);
 	}
 }
 

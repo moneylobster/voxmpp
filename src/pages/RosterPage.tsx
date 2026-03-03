@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useRoster, useActiveChat, useXMPP, useRooms, useRoomActions, useFetchingRoster } from '@/hooks/useXMPP';
+import { useRoster, useActiveChat, useXMPP, useRooms, useRoomActions } from '@/hooks/useXMPP';
 import ContactItem from '@/components/ContactItem';
 import RoomItem from '@/components/RoomItem';
 import { jidToLocal } from '@/utils/xmpp-helpers';
@@ -8,12 +8,24 @@ import { jidToLocal } from '@/utils/xmpp-helpers';
 export default function RosterPage() {
   const navigate = useNavigate();
   const contacts = useRoster();
-  const fetchingRoster = useFetchingRoster();
   const rooms = useRooms();
   const { joinRoom } = useRoomActions();
   const { activeChatJid, setActiveChat, markRead } = useActiveChat();
   const { myJid, status } = useXMPP();
+  const [loadingContacts, setLoadingContacts] = useState(true);
   const [showNewChat, setShowNewChat] = useState(false);
+
+  // Show spinner until contacts arrive or 10s timeout
+  useEffect(() => {
+    if (contacts.length > 0) {
+      setLoadingContacts(false);
+    }
+  }, [contacts.length]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setLoadingContacts(false), 10_000);
+    return () => clearTimeout(timeout);
+  }, []);
   const [newChatTab, setNewChatTab] = useState<'chat' | 'room'>('chat');
   const [newChatJid, setNewChatJid] = useState('');
   const [newRoomJid, setNewRoomJid] = useState('');
@@ -76,7 +88,7 @@ export default function RosterPage() {
       <div className="flex-1 overflow-y-auto">
         {contacts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-[var(--color-text-muted)]">
-            {fetchingRoster ? (
+            {loadingContacts ? (
               <>
                 <svg className="animate-spin w-6 h-6 text-[var(--color-amber-500)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />

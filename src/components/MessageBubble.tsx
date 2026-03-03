@@ -53,11 +53,15 @@ export default function MessageBubble({ message, isGrouped, showTimestamp, showS
         {/* File attachment */}
         {message.oobUrl && <FileAttachment url={message.oobUrl} />}
 
-        {message.body && message.body !== message.oobUrl && (
+        {message.body && message.body !== message.oobUrl ? (
           <p className="text-[var(--color-text-primary)] whitespace-pre-wrap break-words">
             {message.body}
           </p>
-        )}
+        ) : message.isEncrypted && !message.body && !message.oobUrl ? (
+          <p className="text-[var(--color-text-muted)] text-[13px] italic">
+            Unable to decrypt
+          </p>
+        ) : null}
       </div>
 
       {showTimestamp && (
